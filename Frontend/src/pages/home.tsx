@@ -1,5 +1,7 @@
 import { useContext, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { AuthContext } from '../context/AuthContext';
+import { Link } from 'react-router-dom';
+
 
 const navItems = [
   { label: 'Admin Dashboard', active: true },
@@ -130,8 +132,9 @@ const Home = () => {
           <header className="flex h-16 items-center justify-between border-b border-slate-300 bg-[#f4f6f9] px-5 lg:px-8">
             <div className="text-xl font-semibold text-slate-700">Administrator Control</div>
             <div className="flex items-center gap-4 text-slate-700">
+              
               <button type="button" aria-label="notifications" className="text-xl">◌</button>
-              <button type="button" aria-label="profile" className="text-xl">◔</button>
+              <Link to="/profile" aria-label="profile" className="text-xl">◔</Link>
               <button type="button" aria-label="logout" onClick={handleLogout} className="text-xl">↗</button>
             </div>
           </header>

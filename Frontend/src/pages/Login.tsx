@@ -40,7 +40,7 @@ const Login = () => {
 
       // Save token to global context. PublicRoute wrapper will redirect to "/"
       if (auth && data.token) {
-        auth.login(data.token);
+        auth.login(data.token,data.user);
       }
     } catch (err: any) {
       setError(err.message || 'Something went wrong. Please try again.');
