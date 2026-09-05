@@ -1,5 +1,8 @@
 import { useContext, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { AuthContext } from '../context/AuthContext';
+import { Link } from 'react-router-dom';
+import { Bell, User, LogOut } from 'lucide-react';
+
 
 const navItems = [
   { label: 'Admin Dashboard', active: true },
@@ -27,6 +30,7 @@ const Home = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const handleLogout = () => {
     if (auth) {
@@ -129,11 +133,32 @@ const Home = () => {
         <main className="flex-1">
           <header className="flex h-16 items-center justify-between border-b border-slate-300 bg-[#f4f6f9] px-5 lg:px-8">
             <div className="text-xl font-semibold text-slate-700">Administrator Control</div>
-            <div className="flex items-center gap-4 text-slate-700">
-              <button type="button" aria-label="notifications" className="text-xl">◌</button>
-              <button type="button" aria-label="profile" className="text-xl">◔</button>
-              <button type="button" aria-label="logout" onClick={handleLogout} className="text-xl">↗</button>
-            </div>
+              <div className="flex items-center gap-2 text-slate-700">
+                <button
+                  type="button"
+                  aria-label="notifications"
+                  className="flex items-center justify-center rounded-lg border border-slate-300 bg-white p-2 text-slate-700 shadow-sm transition hover:bg-slate-100"
+                >
+                <Bell size={16} />
+                </button>
+
+                <Link
+                  to="/profile"
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-100"
+                >
+                <User size={16} />
+                Profile
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => setShowLogoutConfirm(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 shadow-sm transition hover:bg-red-50"
+                >
+                <LogOut size={16} />
+                Log out
+                </button>
+              </div>
           </header>
 
           <div className="p-5 lg:p-8">
@@ -329,8 +354,41 @@ const Home = () => {
           </div>
         </div>
       )}
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-700/50 px-4"
+          onClick={() => setShowLogoutConfirm(false)}
+        >
+        <div
+          className="w-full max-w-sm rounded-xl border border-slate-300 bg-white p-6 shadow-2xl"
+          onClick={(event) => event.stopPropagation()}
+        >
+        <h2 className="text-lg font-semibold text-slate-900">Log out?</h2>
+        <p className="mt-2 text-sm text-slate-600">
+          You'll need to sign in again to access the dashboard.
+        </p>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => setShowLogoutConfirm(false)}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+          Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+          >
+          Log out
+          </button>
+      </div>
     </div>
-  );
+  </div>
+)}
+</div>
+);
 };
 
 export default Home;
