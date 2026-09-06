@@ -43,7 +43,7 @@ const Registration = () => {
 
       // Save token in global context. PublicRoute will automatically redirect to "/"
       if (auth && data.token) {
-        auth.login(data.token);
+        auth.login(data.token,data.user);
       }
     } catch (err: any) {
       setError(err.message || 'Something went wrong. Please try again.');
