@@ -1,5 +1,6 @@
 import { useContext, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { AuthContext } from '../context/AuthContext';
+import CreateCaseModal from '../components/createCaseModal'; // 1. Import the CreateCaseModal component
 
 const navItems = [
   { label: 'Admin Dashboard', active: true },
@@ -14,24 +15,45 @@ const stats = [
   { label: 'Alerts', value: '0' },
 ];
 
-const documentRows:any = [
-  
-];
+const documentRows: any = [];
 
 const Home = () => {
   const auth = useContext(AuthContext);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  
+  // Modal States
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showCreateCaseModal, setShowCreateCaseModal] = useState(false); // 2. State for Create Case modal
+
+  // Form & Upload States
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [caseIdInput, setCaseIdInput] = useState<string>('');
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
 
   const handleLogout = () => {
     if (auth) {
       auth.logout();
     }
+  };
+
+  const uuidv4 = () => {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
+
+  const openUploadModal = () => {
+    const id = typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+      ? (crypto as any).randomUUID()
+      : uuidv4();
+    setCaseIdInput(id);
+    setShowUploadModal(true);
   };
 
   const closeUploadModal = () => {
@@ -41,6 +63,7 @@ const Home = () => {
     setIsDragging(false);
     setUploadStatus('idle');
     setIsUploading(false);
+    setCaseIdInput('');
     if (inputRef.current) {
       inputRef.current.value = '';
     }
@@ -62,22 +85,96 @@ const Home = () => {
     handleFile(event.dataTransfer.files?.[0]);
   };
 
-  const handleUpload = () => {
+  const decodeUserIdFromToken = (token: string | null): string | null => {
+    if (!token) return null;
+    try {
+      const parts = token.split('.');
+      if (parts.length < 2) return null;
+      const payload = parts[1];
+      const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64.padEnd(b64.length + (4 - (b64.length % 4)) % 4, '=');
+      let json = '';
+      if (typeof globalThis.atob === 'function') {
+        json = globalThis.atob(padded);
+      } else {
+        return null;
+      }
+      const obj = JSON.parse(json);
+      return obj.id ?? null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const token = auth?.token ?? null;
+  const currentUserId = decodeUserIdFromToken(token);
+
+  const handleUpload = async () => {
+    setUploadMessage(null);
+
     if (!selectedFile || !selectedCategory) {
       setUploadStatus('error');
+      setUploadMessage('Please select a file and a category before uploading.');
+      return;
+    }
+
+    const caseId = caseIdInput?.trim();
+    if (!caseId) {
+      setUploadStatus('error');
+      setUploadMessage('Please enter a Case ID to associate this document with.');
       return;
     }
 
     setIsUploading(true);
     setUploadStatus('idle');
 
-    window.setTimeout(() => {
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('caseId', caseId);
+      formData.append('docType', selectedCategory);
+
+      if (currentUserId) formData.append('uploaderId', currentUserId);
+
+      const base = (import.meta as any)?.env?.VITE_API_BASE_URL ?? 'http://localhost:8080';
+
+      const res = await fetch(`${base}/upload`, {
+        method: 'POST',
+        body: formData,
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        const errMsg = data?.error || data?.message || 'Upload failed';
+        setUploadStatus('error');
+        setUploadMessage(errMsg);
+        return;
+      }
+
       setUploadStatus('success');
-      setIsUploading(false);
+      setUploadMessage(data?.message || 'Document uploaded successfully.');
       window.setTimeout(() => {
         closeUploadModal();
       }, 900);
-    }, 600);
+    } catch (error: any) {
+      setUploadStatus('error');
+      setUploadMessage(error?.message || 'Network error during upload');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // 3. Callback when a case is created successfully
+  const handleCaseCreated = (newCaseData: any) => {
+    console.log('Case successfully generated:', newCaseData);
+    // Optionally pre-fill the upload modal with the created case ID and open it directly
+    const createdId = newCaseData?.case?.id || newCaseData?.id;
+    if (createdId) {
+      setCaseIdInput(createdId);
+      setShowUploadModal(true);
+    }
   };
 
   return (
@@ -151,9 +248,17 @@ const Home = () => {
                 >
                   Generate Report
                 </button>
+                {/* 4. Separated target click handler for + Create Case */}
                 <button
                   type="button"
-                  onClick={() => setShowUploadModal(true)}
+                  onClick={() => setShowCreateCaseModal(true)}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                >
+                  + Create Case
+                </button>
+                <button
+                  type="button"
+                  onClick={openUploadModal}
                   className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
                 >
                   + Upload Document
@@ -185,10 +290,8 @@ const Home = () => {
 
             <div className="mt-8 overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-                <h2 className="text-[1.65rem] font-semibold text-slate-900">Document Vault Overview</h2>
+                <h2 className="text-[1.65rem] font-semibold text-slate-900">Cases Overview</h2>
                 <div className="flex items-center gap-2 text-slate-500">
-                  <button type="button" className="text-xl">☰</button>
-                  <button type="button" className="text-xl">⋮</button>
                 </div>
               </div>
 
@@ -203,7 +306,7 @@ const Home = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {documentRows.map((row:any) => (
+                    {documentRows.map((row: any) => (
                       <tr key={row.name} className="border-b border-slate-200 last:border-b-0">
                         <td className="px-5 py-4 text-sm font-medium text-slate-800">{row.name}</td>
                         <td className="px-5 py-4 text-sm text-slate-600">{row.type}</td>
@@ -231,6 +334,15 @@ const Home = () => {
         </main>
       </div>
 
+      {/* 5. Render CreateCaseModal */}
+      <CreateCaseModal
+        isOpen={showCreateCaseModal}
+        onClose={() => setShowCreateCaseModal(false)}
+        onSuccess={handleCaseCreated}
+        currentUser={{ id: currentUserId }}
+      />
+
+      {/* Existing Upload Document Modal */}
       {showUploadModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-700/50 px-4"
@@ -252,6 +364,15 @@ const Home = () => {
 
             <div className="space-y-5 p-5 sm:p-6">
               <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">Case ID</label>
+                <input
+                  value={caseIdInput}
+                  onChange={(e) => setCaseIdInput(e.target.value)}
+                  placeholder="Enter or paste existing Case UUID"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-base text-slate-700 outline-none ring-0 transition focus:border-slate-500"
+                />
+              </div>
+              <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">Document Classification</label>
                 <select
                   value={selectedCategory}
@@ -259,10 +380,11 @@ const Home = () => {
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-base text-slate-700 outline-none ring-0 transition focus:border-slate-500"
                 >
                   <option value="">Select Category...</option>
-                  <option value="Forensics">Forensics</option>
-                  <option value="Evidence">Evidence</option>
-                  <option value="Testimony">Testimony</option>
-                  <option value="Legal">Legal</option>
+                  <option value="fir">FIR</option>
+                  <option value="charge_sheet">Charge Sheet</option>
+                  <option value="evidence">Evidence</option>
+                  <option value="witness_statement">Witness Statement</option>
+                  <option value="other">Other</option>
                 </select>
               </div>
 
@@ -298,13 +420,13 @@ const Home = () => {
 
               {uploadStatus === 'error' && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  Please select a file and a category before uploading.
+                  {uploadMessage ?? 'Please select a file and a category before uploading.'}
                 </div>
               )}
 
               {uploadStatus === 'success' && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                  Document uploaded successfully.
+                  {uploadMessage ?? 'Document uploaded successfully.'}
                 </div>
               )}
 
