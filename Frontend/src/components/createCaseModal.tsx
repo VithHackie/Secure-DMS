@@ -168,7 +168,7 @@ const CreateCaseModal = ({ isOpen, onClose, onSuccess, currentUser, officers = [
                 >
                   <option value="open">Open</option>
                   <option value="under_investigation">Under Investigation</option>
-                  <option value="pending">Pending</option>
+                  <option value="archived">Archived</option>
                   <option value="closed">Closed</option>
                 </select>
               </div>

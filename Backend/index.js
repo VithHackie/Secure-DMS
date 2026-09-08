@@ -240,6 +240,21 @@ app.post("/case", async (req, res)=>{
   }
 })
 
+// Add this route below your POST /case endpoint
+app.get("/cases", async (req, res) => {
+  try {
+    // Fetch all cases from the database
+    const allCases = await Case.findAll({
+      order: [['created_at', 'DESC']] // Newest cases appear first
+    });
+
+    res.status(200).json(allCases);
+  } catch (error) {
+    console.error("Fetch Cases Error:", error);
+    res.status(500).json({ error: "Failed to retrieve case records from the database." });
+  }
+});
+
 app.listen(process.env.PORT, (err) => {
   if (err) console.log(err);
   else console.log("SERVER IS RUNNING ON PORT ", process.env.PORT);

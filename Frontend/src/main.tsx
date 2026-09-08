@@ -8,6 +8,7 @@ import Login from "./pages/Login.tsx";
 import Registration from "./pages/Registration.tsx";
 import { AuthProvider } from "./context/AuthContext.tsx";
 import { ProtectedRoute, PublicRoute } from "./components/RouteGaurds.tsx";
+import Profile from "./pages/Profile.tsx";
 
 const router = createBrowserRouter([
   {
@@ -17,10 +18,9 @@ const router = createBrowserRouter([
         path: "/reg",
         element: <Registration />,
       },
-      // /login here
       {
-        path : "/login",
-        element: <Login/>
+        path: "/login",
+        element: <Login />,
       },
     ],
   },
@@ -31,9 +31,14 @@ const router = createBrowserRouter([
         path: "/",
         element: <Home />,
       },
+      {
+        path: "/profile",
+        element: <Profile />,
+      },
     ],
   },
 ]);
+
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
