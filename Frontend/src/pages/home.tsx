@@ -8,14 +8,13 @@ import {
 } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { Link } from "react-router-dom";
-import { Bell, User, LogOut } from "lucide-react";
+import { Bell, User, LogOut, House, FileText, Archive } from "lucide-react";
 import CreateCaseModal from "../components/createCaseModal";
 
 const navItems = [
-  { label: "Admin Dashboard", active: true },
-  { label: "Audit Trail" },
-  { label: "Document Vault" },
-  { label: "Access Requests" },
+  { label: "Admin Dashboard", active: true, icon: House },
+  { label: "Document Vault", icon: Archive },
+  { label: "Audit Trail", icon: FileText },
 ];
 
 
@@ -246,9 +245,13 @@ const Home = () => {
                       : "text-slate-700 hover:bg-slate-200/80",
                   ].join(" ")}
                 >
-                  <span className="flex h-5 w-5 items-center justify-center text-sm">
-                    {item.active ? "▣" : "▢"}
-                  </span>
+                    <span className="flex h-5 w-5 items-center justify-center text-sm">
+                      {item.icon ? (
+                        <item.icon className={item.active ? 'h-5 w-5 text-white' : 'h-5 w-5 text-slate-600'} />
+                      ) : (
+                        item.active ? "▣" : "▢"
+                      )}
+                    </span>
                   <span>{item.label}</span>
                 </button>
               ))}

@@ -22,6 +22,7 @@ const Profile = () => {
   }
 
   const fields = [
+    { label: 'Officer ID', value: user.id },
     { label: 'Full Name', value: user.fullName },
     { label: 'Email', value: user.email },
     { label: 'Role', value: user.role },
