@@ -8,8 +8,9 @@ import {
 } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { Link } from "react-router-dom";
-import { Bell, User, LogOut, House, FileText, Archive } from "lucide-react";
+import { Bell, User, LogOut, House, FileText, Archive, Eye } from "lucide-react";
 import CreateCaseModal from "../components/createCaseModal";
+import CaseDetailsModal from "../components/CaseDetailsModal";
 
 const navItems = [
   { label: "Admin Dashboard", active: true, icon: House },
@@ -27,6 +28,8 @@ const Home = () => {
   // Modal States
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCreateCaseModal, setShowCreateCaseModal] = useState(false); // 2. State for Create Case modal
+  const [showCaseDetailsModal, setShowCaseDetailsModal] = useState(false);
+  const [selectedCaseForDetails, setSelectedCaseForDetails] = useState<any | null>(null);
 
   // Form & Upload States
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -84,14 +87,30 @@ const Home = () => {
     );
   };
 
-  const openUploadModal = () => {
-    const id =
-      typeof crypto !== "undefined" &&
-      typeof (crypto as any).randomUUID === "function"
-        ? (crypto as any).randomUUID()
-        : uuidv4();
-    setCaseIdInput(id);
+  const openUploadModal = (initialCaseId?: string) => {
+    if (initialCaseId) {
+      setCaseIdInput(initialCaseId);
+    } else if (casesList.length > 0) {
+      setCaseIdInput(casesList[0].id);
+    } else {
+      const id =
+        typeof crypto !== "undefined" &&
+        typeof (crypto as any).randomUUID === "function"
+          ? (crypto as any).randomUUID()
+          : uuidv4();
+      setCaseIdInput(id);
+    }
     setShowUploadModal(true);
+  };
+
+  const openUploadForCase = (caseId: string) => {
+    setCaseIdInput(caseId);
+    setShowUploadModal(true);
+  };
+
+  const openCaseDetails = (caseItem: any) => {
+    setSelectedCaseForDetails(caseItem);
+    setShowCaseDetailsModal(true);
   };
 
   const closeUploadModal = () => {
@@ -196,6 +215,10 @@ const Home = () => {
 
       setUploadStatus("success");
       setUploadMessage(data?.message || "Document uploaded successfully.");
+
+      // Refresh cases overview list
+      fetchCases();
+
       window.setTimeout(() => {
         closeUploadModal();
       }, 900);
@@ -210,7 +233,7 @@ const Home = () => {
   // 3. Callback when a case is created successfully
   const handleCaseCreated = (newCaseData: any) => {
     console.log("Case successfully generated:", newCaseData);
-    // Optionally pre-fill the upload modal with the created case ID and open it directly
+    fetchCases();
     const createdId = newCaseData?.case?.id || newCaseData?.id;
     if (createdId) {
       setCaseIdInput(createdId);
@@ -423,8 +446,11 @@ const Home = () => {
                             {new Date(caseItem.created_at).toLocaleDateString()}
                           </td>
                           <td className="px-5 py-4">
-                            {/* Future implementation: Navigate to dynamic case route using caseItem.id */}
-                            <button className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition">
+                            <button
+                              onClick={() => openCaseDetails(caseItem)}
+                              className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition flex items-center gap-1.5"
+                            >
+                              <Eye className="h-4 w-4" />
                               View Related Details →
                             </button>
                           </td>
@@ -438,6 +464,14 @@ const Home = () => {
           </div>
         </main>
       </div>
+
+      {/* Render Case Details & Document Viewer Modal */}
+      <CaseDetailsModal
+        isOpen={showCaseDetailsModal}
+        onClose={() => setShowCaseDetailsModal(false)}
+        caseItem={selectedCaseForDetails}
+        onUploadForCase={openUploadForCase}
+      />
 
       {/* 5. Render CreateCaseModal */}
       <CreateCaseModal
@@ -474,13 +508,27 @@ const Home = () => {
             <div className="space-y-5 p-5 sm:p-6">
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">
-                  Case ID
+                  Target Case
                 </label>
+                {casesList.length > 0 ? (
+                  <select
+                    value={caseIdInput}
+                    onChange={(e) => setCaseIdInput(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-base text-slate-700 outline-none ring-0 transition focus:border-slate-500 mb-2 font-medium"
+                  >
+                    <option value="">-- Select Case from System --</option>
+                    {casesList.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.case_number} : {c.title}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 <input
                   value={caseIdInput}
                   onChange={(e) => setCaseIdInput(e.target.value)}
                   placeholder="Enter or paste existing Case UUID"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-base text-slate-700 outline-none ring-0 transition focus:border-slate-500"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-mono text-slate-700 outline-none ring-0 transition focus:border-slate-500"
                 />
               </div>
               <div>

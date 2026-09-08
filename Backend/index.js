@@ -10,6 +10,7 @@ import crypto from "node:crypto";
 import { Document } from "./models/DocumentModel.js";
 import axios from 'axios'
 import fs from 'fs'
+import path from 'path';
 import { Case } from "./models/CasesModel.js";
 
 const app = express();
@@ -240,6 +241,9 @@ app.post("/case", async (req, res)=>{
   }
 })
 
+// Serve uploaded files statically
+app.use("/uploads", express.static(path.resolve("uploads")));
+
 // Add this route below your POST /case endpoint
 app.get("/cases", async (req, res) => {
   try {
@@ -252,6 +256,66 @@ app.get("/cases", async (req, res) => {
   } catch (error) {
     console.error("Fetch Cases Error:", error);
     res.status(500).json({ error: "Failed to retrieve case records from the database." });
+  }
+});
+
+// Fetch all documents associated with a specific case
+app.get("/cases/:caseId/documents", async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    const documents = await Document.findAll({
+      where: { case_id: caseId },
+      order: [["created_at", "DESC"]],
+    });
+    res.status(200).json(documents);
+  } catch (error) {
+    console.error("Fetch Case Documents Error:", error);
+    res.status(500).json({ error: "Failed to retrieve documents for this case." });
+  }
+});
+
+// Fetch metadata for a single document
+app.get("/documents/:id", async (req, res) => {
+  try {
+    const doc = await Document.findByPk(req.params.id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+    res.status(200).json(doc);
+  } catch (error) {
+    console.error("Fetch Document Error:", error);
+    res.status(500).json({ error: "Failed to retrieve document details" });
+  }
+});
+
+// Stream or serve physical document file (PDF viewer support)
+app.get("/documents/:id/file", async (req, res) => {
+  try {
+    const doc = await Document.findByPk(req.params.id);
+    if (!doc) {
+      return res.status(404).json({ error: "Document record not found" });
+    }
+
+    const filePath = path.resolve(doc.file_url);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Physical file not found on server storage" });
+    }
+
+    const fileName = doc.file_name || "document.pdf";
+    const ext = path.extname(fileName).toLowerCase();
+
+    let contentType = "application/pdf";
+    if (ext === ".pdf") contentType = "application/pdf";
+    else if (ext === ".png") contentType = "image/png";
+    else if (ext === ".jpg" || ext === ".jpeg") contentType = "image/jpeg";
+    else if (ext === ".txt") contentType = "text/plain";
+    else if (ext === ".doc" || ext === ".docx") contentType = "application/msword";
+    else contentType = "application/octet-stream";
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(fileName)}"`);
+    return res.sendFile(filePath);
+  } catch (error) {
+    console.error("Stream Document File Error:", error);
+    res.status(500).json({ error: "Failed to stream document file" });
   }
 });
 
