@@ -8,15 +8,10 @@ import {
 } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { Link } from "react-router-dom";
-import { Bell, User, LogOut, House, FileText, Archive } from "lucide-react";
+import { Bell, User, LogOut } from "lucide-react";
 import CreateCaseModal from "../components/createCaseModal";
-
-const navItems = [
-  { label: "Admin Dashboard", active: true, icon: House },
-  { label: "Document Vault", icon: Archive },
-  { label: "Audit Trail", icon: FileText },
-];
-
+import ViewCaseModal, { type CaseData } from "../components/ViewCaseModal.tsx";
+import Sidebar from "../components/Sidebar";
 
 const Home = () => {
   const auth = useContext(AuthContext);
@@ -26,7 +21,9 @@ const Home = () => {
 
   // Modal States
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showCreateCaseModal, setShowCreateCaseModal] = useState(false); // 2. State for Create Case modal
+  const [showCreateCaseModal, setShowCreateCaseModal] = useState(false);
+  const [showViewCaseModal, setShowViewCaseModal] = useState(false);
+  const [selectedCase, setSelectedCase] = useState<CaseData | null>(null);
 
   // Form & Upload States
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -40,7 +37,6 @@ const Home = () => {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
 
-  // 2. Define the fetch function
   const fetchCases = async () => {
     try {
       setIsLoadingCases(true);
@@ -62,7 +58,6 @@ const Home = () => {
     }
   };
 
-  // 3. Trigger the fetch on component mount
   useEffect(() => {
     fetchCases();
   }, []);
@@ -207,10 +202,8 @@ const Home = () => {
     }
   };
 
-  // 3. Callback when a case is created successfully
   const handleCaseCreated = (newCaseData: any) => {
-    console.log("Case successfully generated:", newCaseData);
-    // Optionally pre-fill the upload modal with the created case ID and open it directly
+    fetchCases();
     const createdId = newCaseData?.case?.id || newCaseData?.id;
     if (createdId) {
       setCaseIdInput(createdId);
@@ -218,65 +211,16 @@ const Home = () => {
     }
   };
 
+  const openViewCaseModal = (caseItem: CaseData) => {
+    setSelectedCase(caseItem);
+    setShowViewCaseModal(true);
+  };
+
   return (
     <div className="min-h-screen bg-[#eef2f7] text-slate-900">
       <div className="flex min-h-screen">
-        <aside className="hidden w-65 flex-col border-r border-slate-300 bg-[#e7edf5] lg:flex">
-          <div className="px-5 py-4">
-            <div className="text-[2rem] font-semibold tracking-tight text-slate-800">
-              LegalIntegrity CMS
-            </div>
-          </div>
-
-          <div className="px-4 py-4">
-            <div className="mb-3 text-sm font-medium text-slate-500">
-              Case Control
-            </div>
-
-            <nav className="space-y-2">
-              {navItems.map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  className={[
-                    "flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-base font-medium transition",
-                    item.active
-                      ? "bg-slate-800 text-white shadow-sm"
-                      : "text-slate-700 hover:bg-slate-200/80",
-                  ].join(" ")}
-                >
-                    <span className="flex h-5 w-5 items-center justify-center text-sm">
-                      {item.icon ? (
-                        <item.icon className={item.active ? 'h-5 w-5 text-white' : 'h-5 w-5 text-slate-600'} />
-                      ) : (
-                        item.active ? "▣" : "▢"
-                      )}
-                    </span>
-                  <span>{item.label}</span>
-                </button>
-              ))}
-            </nav>
-          </div>
-
-          <div className="mt-auto border-t border-slate-300 bg-[#e7edf5] p-4">
-            <div className="space-y-2">
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-slate-700 hover:bg-slate-200/80"
-              >
-                <span>⚙</span>
-                <span>Settings</span>
-              </button>
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-slate-700 hover:bg-slate-200/80"
-              >
-                <span>?</span>
-                <span>Support</span>
-              </button>
-            </div>
-          </div>
-        </aside>
+        {/* Reusable Sidebar */}
+        <Sidebar activeTab="dashboard" />
 
         <main className="flex-1">
           <header className="flex h-16 items-center justify-between border-b border-slate-300 bg-[#f4f6f9] px-5 lg:px-8">
@@ -326,7 +270,6 @@ const Home = () => {
                 >
                   Generate Report
                 </button>
-                {/* 4. Separated target click handler for + Create Case */}
                 <button
                   type="button"
                   onClick={() => setShowCreateCaseModal(true)}
@@ -344,13 +287,11 @@ const Home = () => {
               </div>
             </div>
 
-
             <div className="mt-8 overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
                 <h2 className="text-[1.65rem] font-semibold text-slate-900">
                   Cases Overview
                 </h2>
-                <div className="flex items-center gap-2 text-slate-500"></div>
               </div>
 
               <div className="overflow-x-auto">
@@ -394,7 +335,7 @@ const Home = () => {
                         </td>
                       </tr>
                     ) : (
-                      casesList.map((caseItem: any) => (
+                      casesList.map((caseItem: CaseData) => (
                         <tr
                           key={caseItem.id}
                           className="border-b border-slate-200 last:border-b-0 hover:bg-slate-50 transition"
@@ -423,8 +364,10 @@ const Home = () => {
                             {new Date(caseItem.created_at).toLocaleDateString()}
                           </td>
                           <td className="px-5 py-4">
-                            {/* Future implementation: Navigate to dynamic case route using caseItem.id */}
-                            <button className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition">
+                            <button
+                              onClick={() => openViewCaseModal(caseItem)}
+                              className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition"
+                            >
                               View Related Details →
                             </button>
                           </td>
@@ -439,12 +382,19 @@ const Home = () => {
         </main>
       </div>
 
-      {/* 5. Render CreateCaseModal */}
+      {/* Render CreateCaseModal */}
       <CreateCaseModal
         isOpen={showCreateCaseModal}
         onClose={() => setShowCreateCaseModal(false)}
         onSuccess={handleCaseCreated}
         currentUser={{ id: currentUserId }}
+      />
+
+      {/* Render ViewCaseModal */}
+      <ViewCaseModal
+        isOpen={showViewCaseModal}
+        onClose={() => setShowViewCaseModal(false)}
+        caseData={selectedCase}
       />
 
       {/* Existing Upload Document Modal */}
@@ -573,6 +523,7 @@ const Home = () => {
           </div>
         </div>
       )}
+
       {showLogoutConfirm && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-700/50 px-4"
