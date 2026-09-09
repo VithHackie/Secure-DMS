@@ -9,6 +9,7 @@ import Registration from "./pages/Registration.tsx";
 import { AuthProvider } from "./context/AuthContext.tsx";
 import { ProtectedRoute, PublicRoute } from "./components/RouteGaurds.tsx";
 import Profile from "./pages/Profile.tsx";
+import DocumentVault from "./pages/Vault.tsx";
 
 const router = createBrowserRouter([
   {
@@ -35,6 +36,10 @@ const router = createBrowserRouter([
         path: "/profile",
         element: <Profile />,
       },
+      {
+        path: "/vault",
+        element : <DocumentVault />
+      }
     ],
   },
 ]);

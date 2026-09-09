@@ -8,9 +8,10 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import crypto from "node:crypto";
 import { Document } from "./models/DocumentModel.js";
-import axios from 'axios'
-import fs from 'fs'
+import axios from 'axios';
+import fs from 'fs';
 import { Case } from "./models/CasesModel.js";
+import { Op } from "sequelize";
 
 const app = express();
 
@@ -31,26 +32,22 @@ const generateToken = (user) => {
       badgeNumber: user.badge_number,
     },
     process.env.JWT_SECRET,
-    { expiresIn: "1d" }, // Token expires in 24 hours
+    { expiresIn: "1d" },
   );
 };
 
 app.post("/signup", async (req, res) => {
   try {
-    const { fullName, email, password, role, badgeNumber, department } =
-      req.body;
+    const { fullName, email, password, role, badgeNumber, department } = req.body;
 
-    // Check if user already exists
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       return res.status(400).json({ message: "Email already registered" });
     }
 
-    // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Save user to Postgres via Sequelize
     const newUser = await User.create({
       full_name: fullName,
       email,
@@ -60,7 +57,6 @@ app.post("/signup", async (req, res) => {
       department,
     });
 
-    // Generate JWT
     const token = generateToken(newUser);
 
     res.status(201).json({
@@ -84,19 +80,16 @@ app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Check if user exists
     const user = await User.findOne({ where: { email } });
     if (!user) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // Validate password hash
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // Generate JWT
     const token = generateToken(user);
 
     res.status(200).json({
@@ -123,12 +116,9 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
     if (!file) return res.status(400).json({ error: "No file uploaded" });
 
-    // 1. Read physical file data
     const fileBuffer = fs.readFileSync(file.path);
-
     const fileBlob = new Blob([fileBuffer], { type: file.mimetype });
 
-    // 2. Forward file to Python OCR Microservice
     const form = new FormData();
     form.append("file", fileBlob, {
       filename: file.originalname,
@@ -143,26 +133,19 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     const ocrData = ocrResponse.data;
     const extractedText = ocrData.extracted_text;
 
-    // 3. Fetch the most recent document for this specific case
     const previousDoc = await Document.findOne({
       where: { case_id: caseId },
       order: [["created_at", "DESC"]],
     });
 
-    // 4. Extract the previous hash (if a document exists)
     const previousHash = previousDoc ? previousDoc.sha256_hash : null;
-
-    // 5. Compute Hash: SHA256(Current OCR Generated Text + Previous Hash)
-    const hashData = previousHash
-      ? extractedText + previousHash
-      : extractedText;
+    const hashData = previousHash ? extractedText + previousHash : extractedText;
 
     const computedHash = crypto
       .createHash("sha256")
       .update(hashData)
       .digest("hex");
 
-    // 6. Save to database using exact schema columns, injecting OCR data into metadata
     const newDoc = await Document.create({
       case_id: caseId,
       uploader_id: uploaderId,
@@ -171,7 +154,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       doc_type: docType || "other",
       sha256_hash: computedHash,
       previous_hash: previousHash,
-      digital_signature: null, // Placeholder for Phase 3
+      digital_signature: null,
       metadata: {
         ocr_confidence: ocrData.confidence_score,
         extracted_fields: ocrData.fields,
@@ -180,8 +163,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     });
 
     res.status(201).json({
-      message:
-        "Document uploaded, processed via OCR, and cryptographically secured.",
+      message: "Document uploaded, processed via OCR, and cryptographically secured.",
       document: newDoc,
       ocr_preview: extractedText.substring(0, 200) + "...",
     });
@@ -191,9 +173,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-app.post("/case", async (req, res)=>{
+app.post("/case", async (req, res) => {
   try {
-    // 1. Destructure the exact keys sent by the React frontend payload
     const { 
       case_number, 
       title, 
@@ -203,14 +184,12 @@ app.post("/case", async (req, res)=>{
       created_by 
     } = req.body;
 
-    // 2. Validate mandatory fields
     if (!case_number || !title) {
       return res.status(400).json({ 
         error: "case_number and title are required fields." 
       });
     }
 
-    // 3. Save to database
     const newCase = await Case.create({
       case_number,
       title,
@@ -220,7 +199,6 @@ app.post("/case", async (req, res)=>{
       created_by: created_by || null
     });
 
-    // 4. Return success response containing the new auto-generated UUID
     res.status(201).json({
       message: "Case successfully generated.",
       case: newCase
@@ -229,7 +207,6 @@ app.post("/case", async (req, res)=>{
   } catch (error) {
     console.error("Create Case Error:", error);
 
-    // Specifically catch PostgreSQL UNIQUE constraint violations (e.g. duplicate case_number)
     if (error.name === 'SequelizeUniqueConstraintError') {
       return res.status(409).json({ 
         error: "A case with this Case Number already exists. Please use a unique identifier." 
@@ -238,20 +215,146 @@ app.post("/case", async (req, res)=>{
 
     res.status(500).json({ error: "Failed to create case record in the database." });
   }
-})
+});
 
-// Add this route below your POST /case endpoint
 app.get("/cases", async (req, res) => {
   try {
-    // Fetch all cases from the database
     const allCases = await Case.findAll({
-      order: [['created_at', 'DESC']] // Newest cases appear first
+      order: [['created_at', 'DESC']]
     });
 
     res.status(200).json(allCases);
   } catch (error) {
     console.error("Fetch Cases Error:", error);
     res.status(500).json({ error: "Failed to retrieve case records from the database." });
+  }
+});
+
+app.get("/vault/search", async (req, res) => {
+  try {
+    const { q } = req.query;
+
+    if (!q || typeof q !== "string") {
+      return res.status(400).json({ error: "Search query is required" });
+    }
+
+    const trimmedQuery = q.trim();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmedQuery);
+
+    // 1. Find matching cases by UUID or Case Number
+    let cases = [];
+    if (isUuid) {
+      cases = await Case.findAll({
+        where: {
+          [Op.or]: [{ id: trimmedQuery }, { case_number: trimmedQuery }]
+        }
+      });
+    } else {
+      cases = await Case.findAll({
+        where: { case_number: trimmedQuery }
+      });
+    }
+
+    let caseIds = cases.map(c => c.id);
+    if (caseIds.length === 0 && isUuid) {
+      caseIds = [trimmedQuery];
+    }
+
+    if (caseIds.length === 0) {
+      return res.status(200).json([]);
+    }
+
+    const allCases = await Case.findAll({ where: { id: caseIds } });
+    const caseMap = new Map(allCases.map(c => [c.id, c]));
+
+    const getContentType = (name) => {
+      const ext = (name || '').split('.').pop()?.toLowerCase() || '';
+      switch (ext) {
+        case 'pdf': return 'application/pdf';
+        case 'txt': return 'text/plain';
+        case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        case 'doc': return 'application/msword';
+        case 'jpg': case 'jpeg': return 'image/jpeg';
+        case 'png': return 'image/png';
+        default: return 'application/octet-stream';
+      }
+    };
+
+    let allDocResults = [];
+
+    // 2. Iterate each matching case and verify document integrity chain
+    for (const caseId of caseIds) {
+      const caseItem = caseMap.get(caseId);
+      const docs = await Document.findAll({
+        where: { case_id: caseId },
+        order: [["created_at", "ASC"]],
+      });
+
+      if (!docs || docs.length === 0) continue;
+
+      let isChainValid = true;
+
+      // Verify cryptographic continuity across document chain
+      for (let i = 0; i < docs.length; i++) {
+        const currentDoc = docs[i];
+
+        if (i === 0) {
+          if (currentDoc.previous_hash !== null) {
+            isChainValid = false;
+            break;
+          }
+        } else {
+          const prevDoc = docs[i - 1];
+          if (currentDoc.previous_hash !== prevDoc.sha256_hash) {
+            isChainValid = false;
+            break;
+          }
+        }
+      }
+
+      const code = isChainValid ? 1 : 0;
+
+      // 3. Attach file bytes and metadata to each document
+      for (const doc of docs) {
+        let fileBase64 = null;
+        let contentType = null;
+
+        if (doc.file_url && fs.existsSync(doc.file_url)) {
+          try {
+            const buffer = fs.readFileSync(doc.file_url);
+            fileBase64 = buffer.toString("base64");
+            contentType = getContentType(doc.file_name || doc.file_url);
+          } catch (err) {
+            console.error("Failed to read file for document", doc.id, err.message);
+          }
+        }
+
+        allDocResults.push({
+          id: doc.id,
+          case_id: doc.case_id,
+          uploader_id: doc.uploader_id,
+          file_name: doc.file_name,
+          file_url: doc.file_url,
+          doc_type: doc.doc_type,
+          created_at: doc.created_at,
+          verification_code: code,
+          file_base64: fileBase64,
+          content_type: contentType,
+          metadata: {
+            ...(doc.metadata || {}),
+            title: caseItem ? caseItem.title : "Case Document",
+            description: caseItem ? caseItem.description : "",
+            case_number: caseItem ? caseItem.case_number : doc.case_id,
+            verification_code: code,
+          },
+        });
+      }
+    }
+
+    res.status(200).json(allDocResults);
+  } catch (error) {
+    console.error("Vault Search Error:", error);
+    res.status(500).json({ error: "Failed to perform vault search" });
   }
 });
 

@@ -1,4 +1,5 @@
 import { House, Archive, FileText } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 interface SidebarProps {
   activeTab?: string;
@@ -11,6 +12,17 @@ const navItems = [
 ];
 
 export const Sidebar = ({ activeTab = "dashboard" }: SidebarProps) => {
+  const navigate = useNavigate();
+
+  const navigationHandler = (value: string) => {
+    if (value == "dashboard") {
+      navigate("/");
+    } else if (value == "vault") {
+      navigate("/vault");
+    } else if (value == "audit") {
+      navigate("/");
+    }
+  };
   return (
     <aside className="hidden w-65 flex-col border-r border-slate-300 bg-[#e7edf5] lg:flex">
       <div className="px-5 py-4">
@@ -32,6 +44,9 @@ export const Sidebar = ({ activeTab = "dashboard" }: SidebarProps) => {
               <button
                 key={item.label}
                 type="button"
+                onClick={() => {
+                  navigationHandler(item.key);
+                }}
                 className={[
                   "flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-base font-medium transition",
                   isActive
