@@ -10,6 +10,7 @@ import { AuthProvider } from "./context/AuthContext.tsx";
 import { ProtectedRoute, PublicRoute } from "./components/RouteGaurds.tsx";
 import Profile from "./pages/Profile.tsx";
 import DocumentVault from "./pages/Vault.tsx";
+import AuditLogs from "./pages/AuditLogs.tsx";
 
 const router = createBrowserRouter([
   {
@@ -39,6 +40,10 @@ const router = createBrowserRouter([
       {
         path: "/vault",
         element : <DocumentVault />
+      },
+      {
+        path: "/logs",
+        element : <AuditLogs />
       }
     ],
   },

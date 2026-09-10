@@ -12,6 +12,8 @@ import axios from 'axios';
 import fs from 'fs';
 import { Case } from "./models/CasesModel.js";
 import { Op } from "sequelize";
+import { AuditLog } from "./models/AuditLogModel.js";
+import auditRoutes from "./routes/auditRoutes.js";
 
 const app = express();
 
@@ -22,6 +24,38 @@ const upload = multer({ dest: "./uploads" });
 app.use(express.json());
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
+
+// Audit Logging Helper
+const logAudit = async (userId, caseId, documentId, action, ipAddress, details = {}) => {
+  try {
+    await AuditLog.create({
+      user_id: userId || null,
+      case_id: caseId || null,
+      document_id: documentId || null,
+      action,
+      ip_address: ipAddress,
+      details
+    });
+  } catch (error) {
+    console.error("Critical: Failed to write audit log:", error);
+  }
+};
+
+// Extract user ID from Bearer JWT token (for audit logging only — no auth enforcement)
+const getUserIdFromRequest = (req) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    return decoded.id || null;
+  } catch {
+    return null;
+  }
+};
+
+// Mount Routes
+app.use("/audit-logs", auditRoutes);
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -91,6 +125,8 @@ app.post("/login", async (req, res) => {
     }
 
     const token = generateToken(user);
+
+    await logAudit(user.id, null, null, 'LOGIN', req.ip);
 
     res.status(200).json({
       message: "Login successful",
@@ -162,6 +198,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       },
     });
 
+    await logAudit(uploaderId, caseId, newDoc.id, 'UPLOAD_DOC', req.ip, { file_name: file.originalname });
+
     res.status(201).json({
       message: "Document uploaded, processed via OCR, and cryptographically secured.",
       document: newDoc,
@@ -199,6 +237,8 @@ app.post("/case", async (req, res) => {
       created_by: created_by || null
     });
 
+    await logAudit(created_by, newCase.id, null, 'CASE_CREATED', req.ip, { case_number });
+
     res.status(201).json({
       message: "Case successfully generated.",
       case: newCase
@@ -233,6 +273,7 @@ app.get("/cases", async (req, res) => {
 app.get("/vault/search", async (req, res) => {
   try {
     const { q } = req.query;
+    const requestingUserId = getUserIdFromRequest(req);
 
     if (!q || typeof q !== "string") {
       return res.status(400).json({ error: "Search query is required" });
@@ -241,7 +282,6 @@ app.get("/vault/search", async (req, res) => {
     const trimmedQuery = q.trim();
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmedQuery);
 
-    // 1. Find matching cases by UUID or Case Number
     let cases = [];
     if (isUuid) {
       cases = await Case.findAll({
@@ -282,7 +322,6 @@ app.get("/vault/search", async (req, res) => {
 
     let allDocResults = [];
 
-    // 2. Iterate each matching case and verify document integrity chain
     for (const caseId of caseIds) {
       const caseItem = caseMap.get(caseId);
       const docs = await Document.findAll({
@@ -292,21 +331,25 @@ app.get("/vault/search", async (req, res) => {
 
       if (!docs || docs.length === 0) continue;
 
+      // Log the vault search with the resolved case_id and user_id from JWT
+      await logAudit(requestingUserId, caseId, null, 'VAULT_SEARCH', req.ip, { query: q });
+
       let isChainValid = true;
 
-      // Verify cryptographic continuity across document chain
       for (let i = 0; i < docs.length; i++) {
         const currentDoc = docs[i];
 
         if (i === 0) {
           if (currentDoc.previous_hash !== null) {
             isChainValid = false;
+            await logAudit(requestingUserId, caseId, currentDoc.id, 'TAMPER_DETECTED', req.ip, { expected_hash: null, found: currentDoc.previous_hash });
             break;
           }
         } else {
           const prevDoc = docs[i - 1];
           if (currentDoc.previous_hash !== prevDoc.sha256_hash) {
             isChainValid = false;
+            await logAudit(requestingUserId, caseId, currentDoc.id, 'TAMPER_DETECTED', req.ip, { expected_hash: prevDoc.sha256_hash, found: currentDoc.previous_hash });
             break;
           }
         }
@@ -314,7 +357,6 @@ app.get("/vault/search", async (req, res) => {
 
       const code = isChainValid ? 1 : 0;
 
-      // 3. Attach file bytes and metadata to each document
       for (const doc of docs) {
         let fileBase64 = null;
         let contentType = null;
@@ -350,11 +392,39 @@ app.get("/vault/search", async (req, res) => {
         });
       }
     }
-
+    
     res.status(200).json(allDocResults);
   } catch (error) {
     console.error("Vault Search Error:", error);
     res.status(500).json({ error: "Failed to perform vault search" });
+  }
+});
+
+// Lightweight endpoint called by the frontend whenever a user opens / downloads a document.
+// The document content itself is served as base64 inside the vault/search response (no separate
+// file-serving call), so this is the only opportunity to record the access event.
+app.post("/vault/log-access", async (req, res) => {
+  try {
+    const requestingUserId = getUserIdFromRequest(req);
+    const { document_id, case_id, action } = req.body;
+
+    // Validate action to prevent arbitrary strings being written to the audit log
+    const allowedActions = ["VIEW_DOC", "DOWNLOAD_DOC"];
+    const resolvedAction = allowedActions.includes(action) ? action : "VIEW_DOC";
+
+    await logAudit(
+      requestingUserId,
+      case_id || null,
+      document_id || null,
+      resolvedAction,
+      req.ip,
+      {}
+    );
+
+    res.status(200).json({ message: "Access event logged successfully." });
+  } catch (error) {
+    console.error("Log Access Error:", error);
+    res.status(500).json({ error: "Failed to log document access event." });
   }
 });
 

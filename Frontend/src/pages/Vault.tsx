@@ -114,6 +114,25 @@ const DocumentVault = () => {
 
       setSelectedDoc(doc);
       setViewerUrl(url);
+
+      // --- Audit log: record that this user viewed/accessed this document ---
+      // Fire-and-forget — wrapped in its own try/catch so it never blocks the viewer.
+      try {
+        await fetch(`${base}/vault/log-access`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            document_id: doc.id,
+            case_id: doc.case_id,
+            action: "VIEW_DOC",
+          }),
+        });
+      } catch {
+        // Non-critical — viewer still opens even if the audit call fails
+      }
     } catch (err) {
       console.error("Failed to load document for viewing", err);
       setSelectedDoc(doc);
@@ -122,6 +141,7 @@ const DocumentVault = () => {
       setViewerLoading(false);
     }
   };
+
 
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -361,14 +381,6 @@ const DocumentVault = () => {
                           )}
 
                           <div className="flex items-center gap-3">
-                            <button
-                              type="button"
-                              onClick={() => openDocumentViewer(doc)}
-                              className="text-xs font-semibold text-slate-600 hover:text-slate-900 hover:underline transition"
-                            >
-                              Inspect Details →
-                            </button>
-
                             {/* VIEW PDF / DOCUMENT BUTTON */}
                             <button
                               type="button"
@@ -376,7 +388,7 @@ const DocumentVault = () => {
                               className="inline-flex items-center gap-1.5 rounded-md bg-[#0f172a] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1e293b] transition shadow-sm"
                             >
                               <Eye size={14} />
-                              View PDF
+                              View DETAILS
                             </button>
                           </div>
                         </div>

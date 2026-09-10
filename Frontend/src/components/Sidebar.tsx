@@ -8,7 +8,7 @@ interface SidebarProps {
 const navItems = [
   { label: "Admin Dashboard", key: "dashboard", icon: House },
   { label: "Document Vault", key: "vault", icon: Archive },
-  { label: "Audit Trail", key: "audit", icon: FileText },
+  { label: "Audit Logs", key: "audit", icon: FileText },
 ];
 
 export const Sidebar = ({ activeTab = "dashboard" }: SidebarProps) => {
@@ -20,7 +20,7 @@ export const Sidebar = ({ activeTab = "dashboard" }: SidebarProps) => {
     } else if (value == "vault") {
       navigate("/vault");
     } else if (value == "audit") {
-      navigate("/");
+      navigate("/logs");
     }
   };
   return (
