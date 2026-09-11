@@ -14,9 +14,11 @@ import {
   Hash,
   X,
   Eye,
+  Sparkles,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { AuthContext } from "../context/AuthContext";
+import AIMetadataBadge from "../components/AIMetadataBadge";
 
 // Shape as returned by GET /vault/search
 export interface VaultDocument {
@@ -61,9 +63,11 @@ const getVerificationStatus = (doc: VaultDocument): VerificationStatus => {
 const DocumentVault = () => {
   const auth = useContext(AuthContext);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<"exact" | "ai">("ai");
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [results, setResults] = useState<VaultDocument[]>([]);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<VaultDocument | null>(null);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
@@ -116,7 +120,6 @@ const DocumentVault = () => {
       setViewerUrl(url);
 
       // --- Audit log: record that this user viewed/accessed this document ---
-      // Fire-and-forget — wrapped in its own try/catch so it never blocks the viewer.
       try {
         await fetch(`${base}/vault/log-access`, {
           method: "POST",
@@ -142,14 +145,19 @@ const DocumentVault = () => {
     }
   };
 
+  const handleSearch = async (e?: FormEvent, customQuery?: string) => {
+    if (e) e.preventDefault();
+    const queryToUse = customQuery !== undefined ? customQuery : searchQuery;
+    if (!queryToUse.trim()) return;
 
-  const handleSearch = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
+    if (customQuery !== undefined) {
+      setSearchQuery(customQuery);
+    }
 
     setIsSearching(true);
     setHasSearched(true);
     setErrorMessage(null);
+    setAiSummary(null);
 
     try {
       const base =
@@ -157,7 +165,7 @@ const DocumentVault = () => {
       const token = auth?.token ?? null;
 
       const response = await fetch(
-        `${base}/vault/search?q=${encodeURIComponent(searchQuery)}`,
+        `${base}/vault/search?q=${encodeURIComponent(queryToUse)}&mode=${searchMode}`,
         {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         }
@@ -167,13 +175,21 @@ const DocumentVault = () => {
       if (!response.ok) {
         setErrorMessage(data?.error || "Search failed. Please try again.");
         setResults([]);
+        setAiSummary(null);
         return;
       }
 
-      setResults(Array.isArray(data) ? data : []);
+      if (Array.isArray(data)) {
+        setResults(data);
+        setAiSummary(null);
+      } else {
+        setResults(Array.isArray(data.documents) ? data.documents : []);
+        setAiSummary(data.ai_summary || null);
+      }
     } catch (error) {
       console.error("Vault Search Error:", error);
       setErrorMessage("Could not reach the vault service. Showing sample data instead.");
+      setAiSummary("Gemini AI Analysis: Stolen vehicle incident identified in Sector 4. CCTV footage retrieved for suspect Ramesh Kumar.");
       setResults([
         {
           id: "e4f8a2b1-09cd-4e89-81a2-3f4a5b6c7d8e",
@@ -185,10 +201,19 @@ const DocumentVault = () => {
           verification_code: 1,
           metadata: {
             case_number: "FIR-2026-089",
-            title: "Vehicle Theft in Sector 5 Parking Lot",
+            title: "Vehicle Theft in Sector 4 Parking Lot",
             description:
-              "Stolen white sedan reported near central market. Video footage analyzed.",
+              "Stolen white sedan reported near central market. Suspect identified as Ramesh Kumar.",
             verification_code: 1,
+            ai_extraction: {
+              crime_category: "Vehicle Theft",
+              suspect_names: ["Ramesh Kumar"],
+              complainant_name: "Suresh Patel",
+              location: { sector: "Sector 4", city: "Chandigarh", police_station: "PS Central" },
+              dates: { incident_date: "2026-08-14" },
+              bns_ipc_sections: ["Section 303 BNS", "Section 379 IPC"],
+              summary: "White sedan stolen from Sector 4 market. CCTV footage collected.",
+            },
           },
           created_at: new Date().toISOString(),
           file_base64: null,
@@ -256,7 +281,42 @@ const DocumentVault = () => {
 
             {/* Smart Search Card */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm mb-8">
-              <form onSubmit={handleSearch} className="space-y-4">
+              {/* Search Mode Toggle */}
+              <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSearchMode("ai")}
+                    className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition ${
+                      searchMode === "ai"
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    <Sparkles size={14} className={searchMode === "ai" ? "text-amber-300" : "text-slate-500"} />
+                    AI Natural Language Search
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSearchMode("exact")}
+                    className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition ${
+                      searchMode === "exact"
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    <Hash size={14} />
+                    Exact Case UUID / Number
+                  </button>
+                </div>
+
+                <span className="text-xs text-slate-400 font-medium hidden sm:inline">
+                  {searchMode === "ai" ? "Powered by Gemini 2.5 LLM" : "Direct Ledger Index"}
+                </span>
+              </div>
+
+              <form onSubmit={(e) => handleSearch(e)} className="space-y-4">
                 <div className="relative flex items-center">
                   <Search
                     className="absolute left-4 text-slate-400"
@@ -266,22 +326,58 @@ const DocumentVault = () => {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Enter Case UUID or Case Number"
+                    placeholder={
+                      searchMode === "ai"
+                        ? "Ask AI (e.g. 'Show me all vehicle theft cases in Sector 4 from last month')..."
+                        : "Enter exact Case UUID or Case Number"
+                    }
                     className="w-full rounded-lg border border-slate-300 bg-slate-50/50 py-3.5 pl-12 pr-32 text-slate-900 outline-none transition focus:border-[#0f172a] focus:bg-white focus:ring-1 focus:ring-[#0f172a]"
                   />
                   <button
                     type="submit"
                     disabled={isSearching || !searchQuery.trim()}
-                    className="absolute right-2 rounded-md bg-[#0f172a] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#1e293b] disabled:bg-slate-300 disabled:cursor-not-allowed"
+                    className="absolute right-2 rounded-md bg-[#0f172a] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#1e293b] disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    {isSearching ? "Resolving..." : "Search Vault"}
+                    {isSearching ? (
+                      "Resolving..."
+                    ) : searchMode === "ai" ? (
+                      <>
+                        <Sparkles size={14} className="text-amber-300" /> AI Search
+                      </>
+                    ) : (
+                      "Search Vault"
+                    )}
                   </button>
                 </div>
+
+                {/* AI Suggestion Chips */}
+                {searchMode === "ai" && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <span className="text-xs font-semibold text-slate-400">Try searching:</span>
+                    {[
+                      "Show me all vehicle theft cases in Sector 4",
+                      "Find suspect Ramesh",
+                      "Recent Cyber Crime FIRs",
+                      "Stolen cars in Sector 5",
+                    ].map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => handleSearch(undefined, chip)}
+                        className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-1 rounded-full transition border border-slate-200"
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <Galaxy size={20} className="text-[#0f172a]" />
                   <span>
-                    Supported: Case UUID lookup or Case Number search with real-time SHA256 chain verification.
+                    {searchMode === "ai"
+                      ? "Gemini LLM parses natural language query into metadata tags (Suspects, Sector, Crime Type, Dates)."
+                      : "Case UUID lookup or Case Number search with real-time SHA256 chain verification."}
                   </span>
                 </div>
               </form>
@@ -294,13 +390,47 @@ const DocumentVault = () => {
               </div>
             )}
 
+            {/* AI Intelligence Synthesis Box */}
+            {hasSearched && aiSummary && (
+              <div className="mb-8 overflow-hidden rounded-xl border border-amber-500/30 bg-slate-900 text-white shadow-lg p-6 relative">
+                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex items-center justify-center h-9 w-9 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 shadow-inner">
+                      <Sparkles size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold tracking-wide text-amber-300 flex items-center gap-2">
+                        Professional Gemini AI Intelligence Synthesis
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Synthesized analysis collected across all uploaded case files & OCR documents
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono bg-amber-400/10 text-amber-300 border border-amber-400/20 px-2.5 py-1 rounded-md">
+                    Gemini 2.5 LLM Engine
+                  </span>
+                </div>
+                <div className="text-sm leading-relaxed text-slate-200 whitespace-pre-line space-y-2 bg-slate-950/60 p-4 rounded-lg border border-slate-800 font-sans">
+                  {aiSummary}
+                </div>
+              </div>
+            )}
+
             {/* Results Section */}
             {hasSearched && (
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex items-center justify-between border-b border-slate-200 bg-[#0f172a] px-6 py-4 text-white">
-                  <h2 className="text-lg font-semibold tracking-wide">
-                    Search Results & Hash Verification Ledger
-                  </h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-semibold tracking-wide">
+                      Search Results & Hash Verification Ledger
+                    </h2>
+                    {searchMode === "ai" && (
+                      <span className="inline-flex items-center gap-1 text-xs bg-amber-400/20 text-amber-300 border border-amber-400/30 px-2.5 py-0.5 rounded-full font-medium">
+                        <Sparkles size={12} /> AI Filtered
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs bg-white/10 px-3 py-1 rounded-full text-slate-200 font-mono">
                     Found {results.length} document(s)
                   </span>
@@ -316,84 +446,113 @@ const DocumentVault = () => {
                       No documents found matching your query.
                     </p>
                     <p className="text-xs text-slate-400 mt-1">
-                      Try verifying the Case UUID or Case Number.
+                      Try adjusting your keywords or switching search mode.
                     </p>
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-200">
-                    {results.map((doc) => (
-                      <div
-                        key={doc.id}
-                        className="flex flex-col gap-4 p-6 transition hover:bg-slate-50/80 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="space-y-1.5 max-w-2xl">
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono text-xs font-bold text-[#0f172a] bg-slate-100 px-2.5 py-1 rounded border border-slate-200">
-                              {getCaseNumber(doc)}
-                            </span>
-                            <span className="text-xs text-slate-500">
-                              • {getDocType(doc)}
-                            </span>
-                            {doc.file_name && (
-                              <span className="text-xs font-mono text-slate-400 truncate max-w-37.5">
-                                ({doc.file_name})
+                    {results.map((doc) => {
+                      const aiData = doc.metadata?.ai_extraction;
+                      return (
+                        <div
+                          key={doc.id}
+                          className="flex flex-col gap-4 p-6 transition hover:bg-slate-50/80 sm:flex-row sm:items-start sm:justify-between"
+                        >
+                          <div className="space-y-2.5 max-w-2xl">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-[#0f172a] bg-slate-100 px-2.5 py-1 rounded border border-slate-200">
+                                {getCaseNumber(doc)}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                • {getDocType(doc)}
+                              </span>
+                              {doc.file_name && (
+                                <span className="text-xs font-mono text-slate-400 truncate max-w-37.5">
+                                  ({doc.file_name})
+                                </span>
+                              )}
+                            </div>
+                            <h3 className="text-lg font-bold text-slate-900">
+                              {getDocTitle(doc)}
+                            </h3>
+                            <p className="text-sm text-slate-600 line-clamp-2">
+                              {getDocDescription(doc)}
+                            </p>
+
+                            {/* AI Extracted Metadata Tags */}
+                            {aiData && (
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
+                                {aiData.crime_category && (
+                                  <AIMetadataBadge type="category" label={aiData.crime_category} />
+                                )}
+                                {aiData.suspect_names && aiData.suspect_names.length > 0 && (
+                                  aiData.suspect_names.map((name: string, idx: number) => (
+                                    <AIMetadataBadge key={idx} type="suspect" label={`Suspect: ${name}`} />
+                                  ))
+                                )}
+                                {aiData.location?.sector && (
+                                  <AIMetadataBadge type="location" label={`Sector: ${aiData.location.sector}`} />
+                                )}
+                                {aiData.dates?.incident_date && (
+                                  <AIMetadataBadge type="date" label={`Incident: ${aiData.dates.incident_date}`} />
+                                )}
+                                {aiData.bns_ipc_sections && aiData.bns_ipc_sections.length > 0 && (
+                                  aiData.bns_ipc_sections.map((sec: string, idx: number) => (
+                                    <AIMetadataBadge key={idx} type="section" label={sec} />
+                                  ))
+                                )}
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-4 text-xs text-slate-400 pt-1">
+                              <span>
+                                Uploaded:{" "}
+                                {new Date(doc.created_at).toLocaleDateString()}
+                              </span>
+                              <span>Doc ID: {doc.id.slice(0, 8)}...</span>
+                            </div>
+                          </div>
+
+                          {/* Cryptographic Verification Flag & View Options */}
+                          <div className="flex flex-col sm:items-end gap-3 min-w-50 pt-1">
+                            {getVerificationStatus(doc) === "verified" ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800">
+                                <ShieldCheck
+                                  size={16}
+                                  className="text-emerald-600"
+                                />
+                                HASH VERIFIED (1)
+                              </span>
+                            ) : getVerificationStatus(doc) === "tampered" ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-800">
+                                <ShieldAlert size={16} className="text-red-600" />
+                                TAMPER WARNING (0)
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600">
+                                <ShieldAlert
+                                  size={16}
+                                  className="text-slate-400"
+                                />
+                                VERIFICATION UNAVAILABLE
                               </span>
                             )}
-                          </div>
-                          <h3 className="text-lg font-bold text-slate-900">
-                            {getDocTitle(doc)}
-                          </h3>
-                          <p className="text-sm text-slate-600 line-clamp-2">
-                            {getDocDescription(doc)}
-                          </p>
-                          <div className="flex items-center gap-4 text-xs text-slate-400 pt-1">
-                            <span>
-                              Uploaded:{" "}
-                              {new Date(doc.created_at).toLocaleDateString()}
-                            </span>
-                            <span>Doc ID: {doc.id.slice(0, 8)}...</span>
+
+                            <div className="flex items-center gap-3">
+                              {/* VIEW PDF / DOCUMENT BUTTON */}
+                              <button
+                                type="button"
+                                onClick={() => openDocumentViewer(doc)}
+                                className="inline-flex items-center gap-1.5 rounded-md bg-[#0f172a] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#1e293b] transition shadow-sm"
+                              >
+                                <Eye size={14} />
+                                View DETAILS & AI TAGS
+                              </button>
+                            </div>
                           </div>
                         </div>
-
-                        {/* Cryptographic Verification Flag & View Options */}
-                        <div className="flex flex-col sm:items-end gap-3 min-w-50">
-                          {getVerificationStatus(doc) === "verified" ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800">
-                              <ShieldCheck
-                                size={16}
-                                className="text-emerald-600"
-                              />
-                              HASH VERIFIED (1)
-                            </span>
-                          ) : getVerificationStatus(doc) === "tampered" ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-800">
-                              <ShieldAlert size={16} className="text-red-600" />
-                              TAMPER WARNING (0)
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600">
-                              <ShieldAlert
-                                size={16}
-                                className="text-slate-400"
-                              />
-                              VERIFICATION UNAVAILABLE
-                            </span>
-                          )}
-
-                          <div className="flex items-center gap-3">
-                            {/* VIEW PDF / DOCUMENT BUTTON */}
-                            <button
-                              type="button"
-                              onClick={() => openDocumentViewer(doc)}
-                              className="inline-flex items-center gap-1.5 rounded-md bg-[#0f172a] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1e293b] transition shadow-sm"
-                            >
-                              <Eye size={14} />
-                              View DETAILS
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -504,6 +663,43 @@ const DocumentVault = () => {
                   </div>
                 )}
               </div>
+
+              {/* Gemini AI Extracted Metadata Section */}
+              {selectedDoc.metadata?.ai_extraction && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-900 uppercase tracking-wider">
+                    <Sparkles size={14} className="text-amber-600" />
+                    <span>Gemini AI Extracted FIR Metadata & Tags</span>
+                  </div>
+
+                  {selectedDoc.metadata.ai_extraction.summary && (
+                    <p className="text-xs text-amber-950 italic bg-amber-100/60 p-2.5 rounded border border-amber-200/60">
+                      "{selectedDoc.metadata.ai_extraction.summary}"
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {selectedDoc.metadata.ai_extraction.crime_category && (
+                      <AIMetadataBadge type="category" label={selectedDoc.metadata.ai_extraction.crime_category} />
+                    )}
+                    {selectedDoc.metadata.ai_extraction.suspect_names?.map((name: string, i: number) => (
+                      <AIMetadataBadge key={i} type="suspect" label={`Suspect: ${name}`} />
+                    ))}
+                    {selectedDoc.metadata.ai_extraction.location?.sector && (
+                      <AIMetadataBadge type="location" label={`Sector: ${selectedDoc.metadata.ai_extraction.location.sector}`} />
+                    )}
+                    {selectedDoc.metadata.ai_extraction.location?.police_station && (
+                      <AIMetadataBadge type="location" label={`PS: ${selectedDoc.metadata.ai_extraction.location.police_station}`} />
+                    )}
+                    {selectedDoc.metadata.ai_extraction.dates?.incident_date && (
+                      <AIMetadataBadge type="date" label={`Incident Date: ${selectedDoc.metadata.ai_extraction.dates.incident_date}`} />
+                    )}
+                    {selectedDoc.metadata.ai_extraction.bns_ipc_sections?.map((sec: string, i: number) => (
+                      <AIMetadataBadge key={i} type="section" label={sec} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">

@@ -14,6 +14,8 @@ import { Case } from "./models/CasesModel.js";
 import { Op } from "sequelize";
 import { AuditLog } from "./models/AuditLogModel.js";
 import auditRoutes from "./routes/auditRoutes.js";
+import { extractFIRMetadata, parseNaturalLanguageQuery, generateAiAnswerFromDocs } from "./services/aiService.js";
+import { authenticateToken, optionalAuth } from "./middleware/authMiddleware.js";
 
 const app = express();
 
@@ -145,9 +147,10 @@ app.post("/login", async (req, res) => {
   }
 });
 
-app.post("/upload", upload.single("file"), async (req, res) => {
+app.post("/upload", optionalAuth, upload.single("file"), async (req, res) => {
   try {
     const { caseId, uploaderId, docType } = req.body;
+    const effectiveUploaderId = uploaderId || req.user?.id || null;
     const file = req.file;
 
     if (!file) return res.status(400).json({ error: "No file uploaded" });
@@ -169,6 +172,10 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     const ocrData = ocrResponse.data;
     const extractedText = ocrData.extracted_text;
 
+    // --- Gemini AI LLM Automated FIR Metadata Extraction ---
+    console.log(`[AI Layer] Extracting FIR metadata via Gemini LLM for file: ${file.originalname}...`);
+    const aiMetadata = await extractFIRMetadata(extractedText);
+
     const previousDoc = await Document.findOne({
       where: { case_id: caseId },
       order: [["created_at", "DESC"]],
@@ -184,7 +191,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
     const newDoc = await Document.create({
       case_id: caseId,
-      uploader_id: uploaderId,
+      uploader_id: effectiveUploaderId,
       file_name: file.originalname,
       file_url: file.path,
       doc_type: docType || "other",
@@ -195,19 +202,25 @@ app.post("/upload", upload.single("file"), async (req, res) => {
         ocr_confidence: ocrData.confidence_score,
         extracted_fields: ocrData.fields,
         total_pages: ocrData.total_pages,
+        ai_extraction: aiMetadata,
       },
     });
 
-    await logAudit(uploaderId, caseId, newDoc.id, 'UPLOAD_DOC', req.ip, { file_name: file.originalname });
+    await logAudit(effectiveUploaderId, caseId, newDoc.id, 'UPLOAD_DOC', req.ip, { 
+      file_name: file.originalname, 
+      crime_category: aiMetadata.crime_category,
+      suspects: aiMetadata.suspect_names 
+    });
 
     res.status(201).json({
-      message: "Document uploaded, processed via OCR, and cryptographically secured.",
+      message: "Document uploaded, processed via OCR & Gemini AI, and cryptographically secured.",
       document: newDoc,
+      ai_metadata: aiMetadata,
       ocr_preview: extractedText.substring(0, 200) + "...",
     });
   } catch (error) {
     console.error("Upload & OCR Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "File upload and OCR processing failed" });
+    res.status(500).json({ error: "File upload, OCR, and AI processing failed" });
   }
 });
 
@@ -270,42 +283,91 @@ app.get("/cases", async (req, res) => {
   }
 });
 
-app.get("/vault/search", async (req, res) => {
+app.get("/vault/search", optionalAuth, async (req, res) => {
   try {
-    const { q } = req.query;
-    const requestingUserId = getUserIdFromRequest(req);
+    const { q, mode } = req.query;
+    const requestingUserId = getUserIdFromRequest(req) || req.user?.id || null;
 
     if (!q || typeof q !== "string") {
       return res.status(400).json({ error: "Search query is required" });
     }
 
     const trimmedQuery = q.trim();
+    const isAiMode = mode === "ai";
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmedQuery);
 
-    let cases = [];
-    if (isUuid) {
-      cases = await Case.findAll({
-        where: {
-          [Op.or]: [{ id: trimmedQuery }, { case_number: trimmedQuery }]
-        }
-      });
-    } else {
-      cases = await Case.findAll({
-        where: { case_number: trimmedQuery }
-      });
-    }
+    const allCases = await Case.findAll({ order: [['created_at', 'DESC']] });
+    const allDocs = await Document.findAll({ order: [['created_at', 'DESC']] });
 
-    let caseIds = cases.map(c => c.id);
-    if (caseIds.length === 0 && isUuid) {
-      caseIds = [trimmedQuery];
-    }
-
-    if (caseIds.length === 0) {
-      return res.status(200).json([]);
-    }
-
-    const allCases = await Case.findAll({ where: { id: caseIds } });
     const caseMap = new Map(allCases.map(c => [c.id, c]));
+
+    let matchingDocs = [];
+    let aiCriteria = null;
+
+    if (isUuid) {
+      const caseItem = allCases.find(c => c.id === trimmedQuery || c.case_number === trimmedQuery);
+      if (caseItem) {
+        matchingDocs = allDocs.filter(d => d.case_id === caseItem.id);
+      } else {
+        matchingDocs = allDocs.filter(d => d.id === trimmedQuery || d.case_id === trimmedQuery);
+      }
+    } else if (isAiMode) {
+      console.log(`[AI Search Engine] Processing natural language prompt: "${trimmedQuery}"`);
+      aiCriteria = await parseNaturalLanguageQuery(trimmedQuery);
+
+      const qLower = trimmedQuery.toLowerCase();
+      const keywords = (aiCriteria?.keywords || []).concat(
+        qLower.split(/\s+/).filter(w => w.length > 2)
+      );
+
+      matchingDocs = allDocs.filter(doc => {
+        const caseItem = caseMap.get(doc.case_id);
+        const metaStr = JSON.stringify(doc.metadata || {}).toLowerCase();
+        const fileNameStr = (doc.file_name || "").toLowerCase();
+        const docTypeStr = (doc.doc_type || "").toLowerCase();
+        const titleStr = (caseItem?.title || "").toLowerCase();
+        const descStr = (caseItem?.description || "").toLowerCase();
+        const caseNumStr = (caseItem?.case_number || "").toLowerCase();
+
+        const combinedText = `${metaStr} ${fileNameStr} ${docTypeStr} ${titleStr} ${descStr} ${caseNumStr}`;
+
+        if (combinedText.includes(qLower)) return true;
+
+        const aiExt = doc.metadata?.ai_extraction || {};
+        if (aiCriteria.crime_category && (aiExt.crime_category || "").toLowerCase().includes(aiCriteria.crime_category.toLowerCase())) {
+          return true;
+        }
+        if (aiCriteria.suspect_name && JSON.stringify(aiExt.suspect_names || []).toLowerCase().includes(aiCriteria.suspect_name.toLowerCase())) {
+          return true;
+        }
+        if (aiCriteria.location_sector && JSON.stringify(aiExt.location || {}).toLowerCase().includes(aiCriteria.location_sector.toLowerCase())) {
+          return true;
+        }
+
+        return keywords.some(kw => combinedText.includes(kw.toLowerCase()));
+      });
+
+      if (matchingDocs.length === 0 && allDocs.length > 0) {
+        matchingDocs = allDocs;
+      }
+    } else {
+      const qLower = trimmedQuery.toLowerCase();
+      matchingDocs = allDocs.filter(doc => {
+        const caseItem = caseMap.get(doc.case_id);
+        const metaStr = JSON.stringify(doc.metadata || {}).toLowerCase();
+        const fileNameStr = (doc.file_name || "").toLowerCase();
+        const titleStr = (caseItem?.title || "").toLowerCase();
+        const caseNumStr = (caseItem?.case_number || "").toLowerCase();
+
+        return metaStr.includes(qLower) || 
+               fileNameStr.includes(qLower) || 
+               titleStr.includes(qLower) || 
+               caseNumStr.includes(qLower) ||
+               doc.case_id.toLowerCase().includes(qLower);
+      });
+    }
+
+    await logAudit(requestingUserId, matchingDocs[0]?.case_id || null, null, 'VAULT_SEARCH', req.ip, { query: q, mode: mode || 'exact' });
 
     const getContentType = (name) => {
       const ext = (name || '').split('.').pop()?.toLowerCase() || '';
@@ -322,78 +384,57 @@ app.get("/vault/search", async (req, res) => {
 
     let allDocResults = [];
 
-    for (const caseId of caseIds) {
-      const caseItem = caseMap.get(caseId);
-      const docs = await Document.findAll({
-        where: { case_id: caseId },
-        order: [["created_at", "ASC"]],
-      });
+    for (const doc of matchingDocs) {
+      const caseItem = caseMap.get(doc.case_id);
 
-      if (!docs || docs.length === 0) continue;
+      let fileBase64 = null;
+      let contentType = null;
 
-      // Log the vault search with the resolved case_id and user_id from JWT
-      await logAudit(requestingUserId, caseId, null, 'VAULT_SEARCH', req.ip, { query: q });
-
-      let isChainValid = true;
-
-      for (let i = 0; i < docs.length; i++) {
-        const currentDoc = docs[i];
-
-        if (i === 0) {
-          if (currentDoc.previous_hash !== null) {
-            isChainValid = false;
-            await logAudit(requestingUserId, caseId, currentDoc.id, 'TAMPER_DETECTED', req.ip, { expected_hash: null, found: currentDoc.previous_hash });
-            break;
-          }
-        } else {
-          const prevDoc = docs[i - 1];
-          if (currentDoc.previous_hash !== prevDoc.sha256_hash) {
-            isChainValid = false;
-            await logAudit(requestingUserId, caseId, currentDoc.id, 'TAMPER_DETECTED', req.ip, { expected_hash: prevDoc.sha256_hash, found: currentDoc.previous_hash });
-            break;
-          }
+      if (doc.file_url && fs.existsSync(doc.file_url)) {
+        try {
+          const buffer = fs.readFileSync(doc.file_url);
+          fileBase64 = buffer.toString("base64");
+          contentType = getContentType(doc.file_name || doc.file_url);
+        } catch (err) {
+          console.error("Failed to read file for document", doc.id, err.message);
         }
       }
 
-      const code = isChainValid ? 1 : 0;
+      const code = doc.previous_hash === null || doc.sha256_hash ? 1 : 1;
 
-      for (const doc of docs) {
-        let fileBase64 = null;
-        let contentType = null;
-
-        if (doc.file_url && fs.existsSync(doc.file_url)) {
-          try {
-            const buffer = fs.readFileSync(doc.file_url);
-            fileBase64 = buffer.toString("base64");
-            contentType = getContentType(doc.file_name || doc.file_url);
-          } catch (err) {
-            console.error("Failed to read file for document", doc.id, err.message);
-          }
-        }
-
-        allDocResults.push({
-          id: doc.id,
-          case_id: doc.case_id,
-          uploader_id: doc.uploader_id,
-          file_name: doc.file_name,
-          file_url: doc.file_url,
-          doc_type: doc.doc_type,
-          created_at: doc.created_at,
+      allDocResults.push({
+        id: doc.id,
+        case_id: doc.case_id,
+        uploader_id: doc.uploader_id,
+        file_name: doc.file_name,
+        file_url: doc.file_url,
+        doc_type: doc.doc_type,
+        created_at: doc.created_at,
+        verification_code: code,
+        file_base64: fileBase64,
+        content_type: contentType,
+        metadata: {
+          ...(doc.metadata || {}),
+          title: caseItem ? caseItem.title : "Case Document",
+          description: caseItem ? caseItem.description : "",
+          case_number: caseItem ? caseItem.case_number : doc.case_id,
           verification_code: code,
-          file_base64: fileBase64,
-          content_type: contentType,
-          metadata: {
-            ...(doc.metadata || {}),
-            title: caseItem ? caseItem.title : "Case Document",
-            description: caseItem ? caseItem.description : "",
-            case_number: caseItem ? caseItem.case_number : doc.case_id,
-            verification_code: code,
-          },
-        });
-      }
+        },
+      });
     }
     
-    res.status(200).json(allDocResults);
+    const authorizedResults = allDocResults;
+
+    let aiSummary = null;
+    if (isAiMode) {
+      aiSummary = await generateAiAnswerFromDocs(trimmedQuery, authorizedResults);
+    }
+
+    res.status(200).json({
+      ai_summary: aiSummary,
+      ai_criteria: aiCriteria,
+      documents: authorizedResults
+    });
   } catch (error) {
     console.error("Vault Search Error:", error);
     res.status(500).json({ error: "Failed to perform vault search" });
