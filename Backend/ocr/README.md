@@ -60,10 +60,10 @@ python main.py
 ```
 or via Uvicorn:
 ```bash
-uvicorn main:app --reload --port 5000
+uvicorn main:app --reload --port 8000
 ```
 
-The service will run on `http://localhost:5000`. You can test interactive API documentation in your browser at `http://localhost:5000/docs`.
+The service will run on `http://localhost:8000`. You can test interactive API documentation in your browser at `http://localhost:8000/docs`.
 
 ---
 

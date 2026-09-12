@@ -118,11 +118,11 @@ const Home = () => {
     handleFile(event.dataTransfer.files?.[0]);
   };
 
-  const decodeUserIdFromToken = (token: string | null): string | null => {
-    if (!token) return null;
+  const decodeUserFromToken = (token: string | null) => {
+    if (!token) return { id: null, role: "investigating_officer", badgeNumber: null };
     try {
       const parts = token.split(".");
-      if (parts.length < 2) return null;
+      if (parts.length < 2) return { id: null, role: "investigating_officer", badgeNumber: null };
       const payload = parts[1];
       const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
       const padded = b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), "=");
@@ -130,17 +130,23 @@ const Home = () => {
       if (typeof globalThis.atob === "function") {
         json = globalThis.atob(padded);
       } else {
-        return null;
+        return { id: null, role: "investigating_officer", badgeNumber: null };
       }
       const obj = JSON.parse(json);
-      return obj.id ?? null;
-    } catch (e) {
-      return null;
+      return {
+        id: obj.id ?? null,
+        role: obj.role ?? "investigating_officer",
+        badgeNumber: obj.badgeNumber ?? null,
+      };
+    } catch {
+      return { id: null, role: "investigating_officer", badgeNumber: null };
     }
   };
 
   const token = auth?.token ?? null;
-  const currentUserId = decodeUserIdFromToken(token);
+  const userPayload = decodeUserFromToken(token);
+  const currentUserId = userPayload.id;
+
 
   const handleUpload = async () => {
     setUploadMessage("");
@@ -227,6 +233,7 @@ const Home = () => {
             <div className="text-xl font-semibold text-slate-700">
               Administrator Control
             </div>
+
             <div className="flex items-center gap-2 text-slate-700">
               <button
                 type="button"
