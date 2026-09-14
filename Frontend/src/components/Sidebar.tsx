@@ -27,9 +27,9 @@ export const Sidebar = ({ activeTab = "dashboard" }: SidebarProps) => {
   return (
     <aside className="hidden w-65 flex-col border-r border-slate-300 bg-[#e7edf5] lg:flex">
       <div className="px-5 py-4 flex items-center gap-2">
-        <img src={logo} alt="LegalIntegrity CMS logo" className="h-9 w-9" />
+        <img src={logo} alt="Secure-DMS logo" className="h-9 w-9" />
           <div className="text-[2rem] font-semibold tracking-tight text-slate-800">
-            LegalIntegrity CMS
+            Secure-DMS
           </div>
       </div>
 
