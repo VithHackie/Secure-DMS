@@ -55,6 +55,7 @@ const getDocType = (doc: VaultDocument) => doc.doc_type || "Document";
 type VerificationStatus = "verified" | "tampered" | "unknown";
 const getVerificationStatus = (doc: VaultDocument): VerificationStatus => {
   const code = doc.verification_code ?? doc.metadata?.verification_code;
+  console.log(code)
   if (code === 1) return "verified";
   if (code === 0) return "tampered";
   return "unknown";

@@ -18,10 +18,20 @@ import { extractFIRMetadata, parseNaturalLanguageQuery, generateAiAnswerFromDocs
 import { authenticateToken, optionalAuth } from "./middleware/authMiddleware.js";
 
 const app = express();
-
+//Javascript, typescript, react, tailwindcss, JWT, crypto, PostgreSql, Axios, Python, FastAPI, SHA256
 connectDB();
 
 const upload = multer({ dest: "./uploads" });
+
+const getVerificationCode = (doc) => {
+  const metadata = doc?.metadata || {};
+
+  if (metadata.tampered === true) return 0;
+  if (metadata.verification_code !== undefined) return Number(metadata.verification_code);
+  if (doc?.verification_code !== undefined) return Number(doc.verification_code);
+
+  return 1;
+};
 
 app.use(express.json());
 app.use(cors());
@@ -400,7 +410,7 @@ app.get("/vault/search", optionalAuth, async (req, res) => {
         }
       }
 
-      const code = doc.previous_hash === null || doc.sha256_hash ? 1 : 1;
+      const code = getVerificationCode(doc);
 
       allDocResults.push({
         id: doc.id,
@@ -466,6 +476,50 @@ app.post("/vault/log-access", async (req, res) => {
   } catch (error) {
     console.error("Log Access Error:", error);
     res.status(500).json({ error: "Failed to log document access event." });
+  }
+});
+
+app.post("/vault/tamper", optionalAuth, async (req, res) => {
+  try {
+    const { document_id, reason } = req.body;
+
+    if (!document_id) {
+      return res.status(400).json({ error: "document_id is required" });
+    }
+
+    const doc = await Document.findByPk(document_id);
+    if (!doc) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    const metadata = {
+      ...(doc.metadata || {}),
+      tampered: true,
+      tampered_reason: reason || "manual test tamper",
+      verification_code: 0,
+    };
+
+    await doc.update({ metadata });
+
+    const requestingUserId = getUserIdFromRequest(req) || req.user?.id || null;
+    await logAudit(
+      requestingUserId,
+      doc.case_id,
+      doc.id,
+      "DOC_TAMPERED",
+      req.ip,
+      { reason: metadata.tampered_reason }
+    );
+
+    res.status(200).json({
+      message: "Document flagged as tampered.",
+      document_id: doc.id,
+      verification_code: 0,
+      metadata,
+    });
+  } catch (error) {
+    console.error("Tamper doc Error:", error);
+    res.status(500).json({ error: "Failed to mark document as tampered" });
   }
 });
 
